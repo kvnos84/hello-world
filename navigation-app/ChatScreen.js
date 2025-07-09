@@ -1,81 +1,88 @@
 // ChatScreen.js
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  View,
-  Platform,
   KeyboardAvoidingView,
-  StyleSheet
+  Platform,
+  StyleSheet,
+  View
 } from 'react-native';
 
-import { GiftedChat, Bubble } from 'react-native-gifted-chat';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Bubble, GiftedChat, InputToolbar } from 'react-native-gifted-chat';
 
-// Firestore imports to interact with your Firestore DB
 import {
-  collection,
   addDoc,
+  collection,
   onSnapshot,
-  query,
-  orderBy
+  orderBy,
+  query
 } from 'firebase/firestore';
 
-/**
- * ChatScreen component
- * Renders the main chat interface and syncs messages with Firestore in real time.
- * Props:
- * - route: contains navigation parameters (userID, name, bgColor)
- * - db: Firestore database instance passed from App.js
- */
-export default function ChatScreen({ route, db }) {
+export default function ChatScreen({ route, db, isConnected }) {
   const { userID, name, bgColor } = route.params;
 
-  // State to hold chat messages
   const [messages, setMessages] = useState([]);
 
-  /**
-   * useEffect to set up Firestore real-time listener
-   * - Listens to the "messages" collection
-   * - Sorts by createdAt in descending order
-   * - Converts Firestore Timestamps to JS Dates (required by GiftedChat)
-   * - Cleans up listener when component unmounts
-   */
-  useEffect(() => {
-    const messagesQuery = query(
-      collection(db, 'messages'),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-      const newMessages = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          _id: doc.id,
-          text: data.text,
-          createdAt: data.createdAt.toDate(),
-          user: data.user
-        };
-      });
-
-      setMessages(newMessages);
-    });
-
-    return () => unsubscribe(); // Clean up listener
-  }, []);
-
-  /**
-   * onSend handler
-   * - Called when user sends a message
-   * - Stores the message in Firestore under "messages" collection
-   */
-  const onSend = (newMessages) => {
-    addDoc(collection(db, 'messages'), newMessages[0]);
+  // Save messages to AsyncStorage
+  const saveMessages = async (messagesToSave) => {
+    try {
+      await AsyncStorage.setItem('chatMessages', JSON.stringify(messagesToSave));
+    } catch (error) {
+      console.log('Error saving messages:', error);
+    }
   };
 
-  /**
-   * renderBubble
-   * - Customizes message bubble spacing
-   * - Aligns messages closer to screen edges
-   */
+  // Load messages from AsyncStorage
+  const loadMessages = async () => {
+    try {
+      const storedMessages = await AsyncStorage.getItem('chatMessages');
+      if (storedMessages) {
+        setMessages(JSON.parse(storedMessages));
+      }
+    } catch (error) {
+      console.log('Error loading messages:', error);
+    }
+  };
+
+  useEffect(() => {
+    let unsubscribe;
+
+    if (isConnected) {
+      const messagesQuery = query(
+        collection(db, 'messages'),
+        orderBy('createdAt', 'desc')
+      );
+
+      unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+        const newMessages = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            _id: doc.id,
+            text: data.text,
+            createdAt: data.createdAt.toDate(),
+            user: data.user
+          };
+        });
+
+        setMessages(newMessages);
+        saveMessages(newMessages); // Save to AsyncStorage
+      });
+    } else {
+      loadMessages(); // Load from AsyncStorage
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [isConnected]);
+
+  const onSend = (newMessages = []) => {
+    addDoc(collection(db, 'messages'), newMessages[0]);
+    setMessages(previousMessages => GiftedChat.append(previousMessages, newMessages));
+    saveMessages([newMessages[0], ...messages]); // Save sent message offline
+  };
+
   const renderBubble = (props) => (
     <Bubble
       {...props}
@@ -86,25 +93,33 @@ export default function ChatScreen({ route, db }) {
     />
   );
 
+  const renderInputToolbar = (props) => {
+  if (isConnected) {
+    return <InputToolbar {...props} />;
+  } else {
+    return null;
+  }
+};
+
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 63 : 0} // Adjust for iOS header
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 63 : 0}
       >
         <GiftedChat
-          messages={messages} // Messages from Firestore
-          onSend={onSend}     // Send handler
-          user={{ _id: userID, name }} // Authenticated user info
-          renderBubble={renderBubble}  // Custom bubble spacing
+          messages={messages}
+          onSend={onSend}
+          user={{ _id: userID, name }}
+          renderBubble={renderBubble}
+          renderInputToolbar={renderInputToolbar}
         />
       </KeyboardAvoidingView>
     </View>
   );
 }
 
-// Basic full-screen container style
 const styles = StyleSheet.create({
   container: {
     flex: 1
