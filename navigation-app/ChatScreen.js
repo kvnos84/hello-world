@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
-  View
+  View,
 } from 'react-native';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,6 +19,10 @@ import {
   orderBy,
   query
 } from 'firebase/firestore';
+
+import CustomActions from './CustomActions';
+
+import MapView, { Marker } from 'react-native-maps';
 
 export default function ChatScreen({ route, db, isConnected }) {
   const { userID, name, bgColor } = route.params;
@@ -59,9 +64,10 @@ export default function ChatScreen({ route, db, isConnected }) {
           const data = doc.data();
           return {
             _id: doc.id,
-            text: data.text,
+            text: data.text || '',
             createdAt: data.createdAt.toDate(),
-            user: data.user
+            user: data.user,
+            image: data.image || null,
           };
         });
 
@@ -78,9 +84,10 @@ export default function ChatScreen({ route, db, isConnected }) {
   }, [isConnected]);
 
   const onSend = (newMessages = []) => {
-    addDoc(collection(db, 'messages'), newMessages[0]);
+    const message = newMessages[0];
+    addDoc(collection(db, 'messages'), message);
     setMessages(previousMessages => GiftedChat.append(previousMessages, newMessages));
-    saveMessages([newMessages[0], ...messages]); // Save sent message offline
+    saveMessages([message, ...messages]); // Save sent message offline
   };
 
   const renderBubble = (props) => (
@@ -93,13 +100,60 @@ export default function ChatScreen({ route, db, isConnected }) {
     />
   );
 
-  const renderInputToolbar = (props) => {
-  if (isConnected) {
-    return <InputToolbar {...props} />;
-  } else {
-    return null;
+  const renderCustomView = (props) => {
+  const { currentMessage } = props;
+
+  if (currentMessage.location) {
+    return (
+      <View style={{ borderRadius: 10, overflow: 'hidden', margin: 5 }}>
+        <MapView
+          style={{ width: 150, height: 100 }}
+          region={{
+            latitude: currentMessage.location.latitude,
+            longitude: currentMessage.location.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }}
+          scrollEnabled={false}
+          zoomEnabled={false}
+        >
+          <Marker
+            coordinate={{
+              latitude: currentMessage.location.latitude,
+              longitude: currentMessage.location.longitude,
+            }}
+          />
+        </MapView>
+      </View>
+    );
   }
+
+  if (currentMessage.image) {
+    return (
+      <View style={{ borderRadius: 10, overflow: 'hidden', margin: 5 }}>
+        <Image
+          source={{ uri: currentMessage.image }}
+          style={{ width: 150, height: 100 }}
+          resizeMode="cover"
+        />
+      </View>
+    );
+  }
+
+  return null;
 };
+
+  const renderActions = (props) => {
+    return <CustomActions onSend={onSend} />;
+  };
+
+  const renderInputToolbar = (props) => {
+    if (isConnected) {
+      return <InputToolbar {...props} />;
+    } else {
+      return null;
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
@@ -114,6 +168,8 @@ export default function ChatScreen({ route, db, isConnected }) {
           user={{ _id: userID, name }}
           renderBubble={renderBubble}
           renderInputToolbar={renderInputToolbar}
+          renderActions={renderActions}
+          renderCustomView={renderCustomView}
         />
       </KeyboardAvoidingView>
     </View>
